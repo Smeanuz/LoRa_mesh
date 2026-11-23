@@ -62,7 +62,7 @@ void ping_handler_process(const protocol_packet_t *packet)
            packet->payload_len);
 
     /* Send PONG through LoRa application */
-    ret = lora_app_send_packet(&pong_packet);
+    ret = lora_app_send_packet(&pong_packet, LORA_TX_POLICY_RESPONSE);
 
     if (ret == 0)
     {
@@ -133,7 +133,7 @@ int ping_handler_send(uint16_t dst_id,
     g_ping_pending.seq = g_ping_seq;
     g_ping_pending.timestamp_ms = k_uptime_get();
 
-    ret = lora_app_send_packet(&ping_packet);
+    ret = lora_app_send_packet(&ping_packet, LORA_TX_POLICY_IMMEDIATE);
 
     if (ret != 0)
     {

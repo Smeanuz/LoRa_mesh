@@ -48,7 +48,7 @@ mesh_packet_result_t mesh_router_process(const protocol_packet_t *packet)
     /* Decrease TTL before forwarding */
     forward_packet.ttl--;
 
-    ret = lora_app_send_packet(&forward_packet);
+    ret = lora_app_send_packet(&forward_packet, LORA_TX_POLICY_IMMEDIATE);
 
     if (ret != 0)
     {

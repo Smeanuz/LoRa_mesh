@@ -10,6 +10,7 @@
 #include "lora_app.h"
 #include "lora_radio.h"
 #include "uart_cmd.h"
+#include "protocol_config.h"
 
 
 /*===========================================================================
@@ -21,10 +22,11 @@
 
 #define LORA_RX_QUEUE_SIZE       8U
 
-#define LORA_OWNER_STACK_SIZE    2048U
+#define LORA_OWNER_STACK_SIZE    3072U
 #define LORA_OWNER_PRIORITY      5
 
 #define LORA_INIT_TIMEOUT_MS     5000
+
 
 
 /*===========================================================================
@@ -36,6 +38,9 @@ struct lora_tx_packet
 {
     uint8_t data[LORA_TX_MAX_LEN];
     uint16_t len;
+
+    lora_tx_policy_t policy;
+    int64_t send_at;
 };
 
 
@@ -115,22 +120,12 @@ static void lora_log_tx(int result, uint16_t len)
     }
 }
 
+/*===========================================================================
+ * STATIC FUNCTION DECLARATIONS
+ *===========================================================================*/
 
-// static void lora_log_rx(const struct lora_rx_packet *info)
-// {
-//     uart_cmd_SendString("[LoRa RX] Packet received");
-
-//     uart_cmd_SendString(" | Size: ");
-//     uart_cmd_SendInt(info->len);
-
-//     uart_cmd_SendString(" | RSSI: ");
-//     uart_cmd_SendInt(info->rssi);
-//     uart_cmd_SendString(" dBm");
-
-//     uart_cmd_SendString(" | SNR: ");
-//     uart_cmd_SendInt(info->snr);
-//     uart_cmd_SendString(" dB\r\n");
-// }
+static int lora_tx_find_earliest(const struct lora_tx_packet *packets, size_t count);
+static uint32_t lora_tx_get_delay_ms(lora_tx_policy_t policy);
 
 
 /*===========================================================================
@@ -188,16 +183,19 @@ static void lora_rx_callback(const struct device *dev,
  * OWNER THREAD
  *===========================================================================*/
 
+
 static void lora_owner_thread(void *arg1, void *arg2, void *arg3)
 {
     struct lora_tx_packet tx_packet;
+
+    struct lora_tx_packet pending_packets[LORA_TX_QUEUE_SIZE];
+    size_t pending_count = 0U;
 
     int ret;
 
     ARG_UNUSED(arg1);
     ARG_UNUSED(arg2);
     ARG_UNUSED(arg3);
-
 
     /*-----------------------------------------------------------------------
      * Initialize radio
@@ -216,28 +214,67 @@ static void lora_owner_thread(void *arg1, void *arg2, void *arg3)
         return;
     }
 
-
     /*-----------------------------------------------------------------------
      * Main Owner Thread loop
      *-----------------------------------------------------------------------*/
 
     while (1)
     {
-        bool tx_pending = false;
-
+        int earliest_index;
+        int64_t now;
+        int64_t wait_ms;
+        bool tx_due = false;
 
         /*-------------------------------------------------------------------
-         * 1. Process TX request
+         * 1. Collect TX requests from message queue
          *-------------------------------------------------------------------*/
 
-        ret = k_msgq_get(&lora_tx_msgq,
-                         &tx_packet,
-                         K_NO_WAIT);
-
-        if (ret == 0)
+        while (pending_count < LORA_TX_QUEUE_SIZE)
         {
-            tx_pending = true;
+            ret = k_msgq_get(&lora_tx_msgq,
+                             &tx_packet,
+                             K_NO_WAIT);
 
+            if (ret != 0)
+            {
+                break;
+            }
+
+            pending_packets[pending_count] = tx_packet;
+            pending_count++;
+        }
+
+        /*-------------------------------------------------------------------
+         * 2. Select earliest TX packet
+         *-------------------------------------------------------------------*/
+
+        if (pending_count > 0U)
+        {
+            earliest_index = lora_tx_find_earliest(
+                pending_packets,
+                pending_count);
+
+            if (earliest_index >= 0)
+            {
+                now = k_uptime_get();
+
+                tx_packet = pending_packets[earliest_index];
+
+                wait_ms = tx_packet.send_at - now;
+
+                if (wait_ms <= 0)
+                {
+                    tx_due = true;
+                }
+            }
+        }
+
+        /*-------------------------------------------------------------------
+         * 3. Transmit packet when it is ready
+         *-------------------------------------------------------------------*/
+
+        if (tx_due)
+        {
             /*
              * Stop asynchronous RX before transmitting.
              */
@@ -261,37 +298,35 @@ static void lora_owner_thread(void *arg1, void *arg2, void *arg3)
                     uart_cmd_SendString("\r\n");
 
                     /*
-                     * Put the packet back into the queue.
-                     * If the queue is full, this packet is dropped.
+                     * Keep packet in pending queue.
+                     * Retry after the next scheduler wake-up.
                      */
-                    if (k_msgq_put(&lora_tx_msgq,
-                                   &tx_packet,
-                                   K_NO_WAIT) < 0)
-                    {
-                        uart_cmd_SendString(
-                            "[LoRa TX] Packet dropped\r\n");
-                    }
-
-                    tx_pending = false;
+                    tx_due = false;
                 }
             }
 
-
-            /*---------------------------------------------------------------
-             * Transmit packet
-             *---------------------------------------------------------------*/
-
-            if (tx_pending)
+            /*
+             * Transmit packet.
+             */
+            if (tx_due)
             {
                 ret = lora_radio_send(tx_packet.data,
                                       tx_packet.len);
 
                 lora_log_tx(ret, tx_packet.len);
+
+                /*
+                 * Remove transmitted packet from pending queue.
+                 */
+                pending_count--;
+
+                pending_packets[earliest_index] =
+                    pending_packets[pending_count];
             }
         }
 
         /*-------------------------------------------------------------------
-         * 3. Reconcile RX state
+         * 4. Reconcile RX state
          *-------------------------------------------------------------------*/
 
         if (atomic_get(&lora_rx_enable) &&
@@ -337,12 +372,44 @@ static void lora_owner_thread(void *arg1, void *arg2, void *arg3)
             }
         }
 
-
         /*-------------------------------------------------------------------
-         * 4. Sleep until next event
+         * 5. Wait for next TX event or scheduled deadline
          *-------------------------------------------------------------------*/
 
-        k_sem_take(&lora_owner_wake_sem, K_FOREVER);
+        if (!tx_due && (pending_count > 0U))
+        {
+            /*
+            * TX is ready but RX could not be stopped.
+            * Keep packet and retry after 100 ms.
+            */
+            k_sem_take(&lora_owner_wake_sem, K_MSEC(100));
+        }
+        else if (pending_count > 0U)
+        {
+            earliest_index = lora_tx_find_earliest(
+                pending_packets,
+                pending_count);
+
+            now = k_uptime_get();
+
+            wait_ms = pending_packets[earliest_index].send_at - now;
+
+            if (wait_ms > 0)
+            {
+                k_sem_take(&lora_owner_wake_sem, K_MSEC(wait_ms));
+            }
+            else
+            {
+                continue;
+            }
+        }
+        else
+        {
+            /*
+            * No pending packet.
+            */
+            k_sem_take(&lora_owner_wake_sem, K_FOREVER);
+        }
     }
 }
 
@@ -419,7 +486,7 @@ int lora_app_init(void)
 /*
  * Send raw data through LoRa.
  */
-int lora_app_send(const uint8_t *data, size_t len)
+int lora_app_send(const uint8_t *data, size_t len, lora_tx_policy_t policy)
 {
     struct lora_tx_packet packet;
     int ret;
@@ -436,7 +503,14 @@ int lora_app_send(const uint8_t *data, size_t len)
         return -EINVAL;
     }
 
+    if (policy > LORA_TX_POLICY_DISCOVERY)
+    {
+        return -EINVAL;
+    }
+
     packet.len = (uint16_t)len;
+    packet.policy = policy;
+    packet.send_at = k_uptime_get() + lora_tx_get_delay_ms(policy);
 
     memcpy(packet.data, data, len);
 
@@ -460,7 +534,7 @@ int lora_app_send(const uint8_t *data, size_t len)
 /*
  * Encode and send protocol packet through LoRa.
  */
-int lora_app_send_packet(const protocol_packet_t *packet)
+int lora_app_send_packet(const protocol_packet_t *packet, lora_tx_policy_t policy)
 {
     uint8_t buffer[PROTOCOL_MAX_PACKET_SIZE];
     size_t encoded_len;
@@ -481,7 +555,7 @@ int lora_app_send_packet(const protocol_packet_t *packet)
         return ret;
     }
 
-    return lora_app_send(buffer, encoded_len);
+    return lora_app_send(buffer, encoded_len, policy);
 }
 
 /*
@@ -545,7 +619,7 @@ int lora_app_send_string(const char *msg)
     }
 
     return lora_app_send((const uint8_t *)msg,
-                         strlen(msg));
+                         strlen(msg), LORA_TX_POLICY_IMMEDIATE);
 }
 
 
@@ -610,3 +684,46 @@ uint32_t lora_app_get_rx_count(void)
 {
     return (uint32_t)atomic_get(&lora_rx_count);
 }
+
+static int lora_tx_find_earliest(const struct lora_tx_packet *packets, size_t count)
+{
+    size_t i;
+    size_t earliest = 0U;
+
+    if ((packets == NULL) || (count == 0U))
+    {
+        return -1;
+    }
+
+    for (i = 1U; i < count; i++)
+    {
+        if (packets[i].send_at < packets[earliest].send_at)
+        {
+            earliest = i;
+        }
+    }
+
+    return (int)earliest;
+}
+
+static uint32_t lora_tx_get_delay_ms(lora_tx_policy_t policy)
+{
+    switch (policy)
+    {
+        case LORA_TX_POLICY_IMMEDIATE:
+            return 0U;
+
+        case LORA_TX_POLICY_RESPONSE:
+            return 50U;
+
+        case LORA_TX_POLICY_FORWARD:
+            return 100U;
+
+        case LORA_TX_POLICY_DISCOVERY:
+            return 400U;
+
+        default:
+            return 0U;
+    }
+}
+

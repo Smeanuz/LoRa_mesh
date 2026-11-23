@@ -15,7 +15,7 @@
 #define PACKET_PROCESSOR_STACK_SIZE       2048
 #define PACKET_PROCESSOR_PRIORITY         5
 
-#define PACKET_PROCESSOR_RX_TIMEOUT_MS    10U
+#define PACKET_PROCESSOR_RX_TIMEOUT_MS    100U
 
 static struct k_thread packet_processor_thread_data;
 static K_THREAD_STACK_DEFINE(packet_processor_stack,

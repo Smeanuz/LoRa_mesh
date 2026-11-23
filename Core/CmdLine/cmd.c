@@ -682,7 +682,7 @@ static int Cmd_lora_send_packet(int argc, char *argv[])
     }
 
     /* Encode and enqueue packet */
-    ret = lora_app_send_packet(&packet);
+    ret = lora_app_send_packet(&packet, LORA_TX_POLICY_IMMEDIATE);
 
     if (ret == 0)
     {
