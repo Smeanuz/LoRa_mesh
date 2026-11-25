@@ -1,0 +1,17 @@
+# --- Zephyr build output ---
+build/
+build-*/
+twister-out*/
+
+# --- VS Code: chỉ commit cấu hình dùng chung, không có đường dẫn tuyệt đối ---
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/*.svd
+
+# --- Linh tinh ---
+*.log
+.DS_Store
+Thumbs.db
