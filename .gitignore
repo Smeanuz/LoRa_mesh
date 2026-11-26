@@ -15,3 +15,4 @@ twister-out*/
 *.log
 .DS_Store
 Thumbs.db
+/.clangd

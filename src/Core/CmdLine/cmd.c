@@ -11,10 +11,10 @@
 #include "cmd_line.h"
 
 #include "../../BSP/uart_cmd/uart_cmd.h"
-#include "../../Core/LED/led_sts.h"
+#include "led_sts.h"
 #include "lora_app.h"
 #include "ping_handler.h"
-#include "../../protocol/common/protocol_config.h"
+#include "protocol_config.h"
 
 
 

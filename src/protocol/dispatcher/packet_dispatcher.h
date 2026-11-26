@@ -4,7 +4,7 @@
 #ifndef _PACKET_DISPATCHER_H_
 #define _PACKET_DISPATCHER_H_
 
-#include <protocol_packet.h>
+#include "protocol_packet.h"
 
 int packet_dispatcher_init(void);
 

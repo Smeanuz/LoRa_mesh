@@ -1,3 +1,5 @@
+
+
 #include "packet_dispatcher.h"
 
 #include "protocol_config.h"
@@ -5,7 +7,6 @@
 #include "uart_cmd.h"
 
 #include <zephyr/kernel.h>
-#include <errno.h>
 
 void packet_dispatcher_process(const protocol_packet_t *packet)
 {
