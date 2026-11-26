@@ -1,0 +1,42 @@
+{
+  // west lấy từ venv chuẩn của Zephyr workspace: <ZEPHYR_BASE>/../.venv
+  // Biến môi trường cần có trên mỗi máy: ZEPHYR_BASE, JLINK_DIR
+  "version": "2.0.0",
+  "tasks": [
+    {
+      // Build tăng dần: debug.conf đã nằm trong CMake cache từ lần pristine
+      "label": "west build (debug)",
+      "type": "process",
+      "command": "${env:ZEPHYR_BASE}/../.venv/Scripts/west.exe",
+      "linux": { "command": "${env:ZEPHYR_BASE}/../.venv/bin/west" },
+      "args": ["build", "-b", "lora_e5_mini"],
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      // Chạy lần đầu, hoặc sau khi sửa prj.conf / debug.conf / CMakeLists.txt / overlay
+      "label": "west build (pristine, debug)",
+      "type": "process",
+      "command": "${env:ZEPHYR_BASE}/../.venv/Scripts/west.exe",
+      "linux": { "command": "${env:ZEPHYR_BASE}/../.venv/bin/west" },
+      "args": ["build", "-b", "lora_e5_mini", "-p", "always", "--", "-DEXTRA_CONF_FILE=debug.conf"],
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "west build (release)",
+      "type": "process",
+      "command": "${env:ZEPHYR_BASE}/../.venv/Scripts/west.exe",
+      "linux": { "command": "${env:ZEPHYR_BASE}/../.venv/bin/west" },
+      "args": ["build", "-b", "lora_e5_mini", "-p", "always"],
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "west flash (J-Link)",
+      "type": "process",
+      "command": "${env:ZEPHYR_BASE}/../.venv/Scripts/west.exe",
+      "linux": { "command": "${env:ZEPHYR_BASE}/../.venv/bin/west" },
+      "args": ["flash", "-r", "jlink", "--commander", "${env:JLINK_DIR}/JLink.exe"],
+      "problemMatcher": []
+    }
+  ]
+}

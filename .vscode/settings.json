@@ -1,0 +1,14 @@
+{
+  // IntelliSense lấy include/define/compiler từ compile_commands.json do west build sinh ra
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
+  "C_Cpp.default.configurationProvider": "",
+  "cmake.configureOnOpen": false,
+  "cmake.automaticReconfigure": false,
+  "files.associations": {
+    "*.overlay": "dts",
+    "*.conf": "properties"
+  },
+  "files.exclude": {
+    "build/": true
+  }
+}
