@@ -9,8 +9,6 @@
 #include <zephyr/drivers/uart.h>
 
 #include "uart_cmd.h"
-#include "zephyr/sys/printk.h"
-
 
 
 #define UART_CMD                    DT_NODELABEL(usart1)

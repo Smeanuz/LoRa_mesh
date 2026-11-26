@@ -1,0 +1,7 @@
+
+
+&usart1 {
+    status = "okay";
+};
+
+
